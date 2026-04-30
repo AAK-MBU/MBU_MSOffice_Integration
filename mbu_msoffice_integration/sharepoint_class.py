@@ -29,25 +29,18 @@ Example:
     sp.download_files("FolderName", "C:\\LocalPath")
 """
 
-import os
-
 import math
-
+import os
 import traceback
-
-from pathlib import PurePath
-
 from io import BytesIO
-
-from typing import Optional, List, Dict, Any, Union
-
-from openpyxl.styles import Font, Alignment
-from openpyxl import load_workbook
+from pathlib import PurePath
+from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
-
 from office365.sharepoint.client_context import ClientContext
 from office365.sharepoint.files.file import File
+from openpyxl import load_workbook
+from openpyxl.styles import Alignment, Font
 
 
 class Sharepoint:
@@ -64,7 +57,15 @@ class Sharepoint:
     """
 
     def __init__(
-            self, tenant: str, client_id: str, thumbprint: str, cert_path: str, site_url: str, site_name: str, document_library: str
+        self,
+        tenant: str,
+        client_id: str,
+        thumbprint: str,
+        cert_path: str,
+        site_url: str,
+        site_name: str,
+        document_library: str,
+        site_type: str = "Teams",
     ):
         """Initializes the Sharepoint class with credentials and site details."""
         self.tenant = tenant
@@ -74,6 +75,7 @@ class Sharepoint:
         self.site_url = site_url
         self.site_name = site_name
         self.document_library = document_library
+        self.site_type = site_type
         self.ctx = self._auth()
 
     def _auth(self):
@@ -85,12 +87,12 @@ class Sharepoint:
                             otherwise None.
         """
         try:
-            site_full_url = f"{self.site_url}/teams/{self.site_name}"
+            site_full_url = f"{self.site_url}/{self.site_type}/{self.site_name}"
             ctx = ClientContext(site_full_url).with_client_certificate(
                 tenant=self.tenant,
                 client_id=self.client_id,
                 thumbprint=self.thumbprint,
-                cert_path=self.cert_path
+                cert_path=self.cert_path,
             )
             web = ctx.web
             ctx.load(web)
@@ -113,7 +115,7 @@ class Sharepoint:
         """
         if self.ctx:
             try:
-                folder_url = f"/teams/{self.site_name}/{self.document_library}/{folder_name}"
+                folder_url = f"/{self.site_type}/{self.site_name}/{self.document_library}/{folder_name}"
                 folder = self.ctx.web.get_folder_by_server_relative_url(folder_url)
                 files = folder.files
                 self.ctx.load(files)
@@ -138,7 +140,7 @@ class Sharepoint:
         """
         if self.ctx:
             try:
-                file_url = f"/teams/{self.site_name}/{self.document_library}/{folder_name}/{file_name}"
+                file_url = f"/{self.site_type}/{self.site_name}/{self.document_library}/{folder_name}/{file_name}"
                 file = self.ctx.web.get_file_by_server_relative_url(file_url)
                 file_content = file.read().execute_query()
                 return file_content.value
@@ -147,13 +149,15 @@ class Sharepoint:
                 return None
         return None
 
-    def fetch_file_using_open_binary(self, file_name: str, folder_name: str) -> Optional[bytes]:
+    def fetch_file_using_open_binary(
+        self, file_name: str, folder_name: str
+    ) -> Optional[bytes]:
         """
         Downloads a file using the open_binary method from SharePoint.
         """
         if self.ctx:
             try:
-                file_url = f"/teams/{self.site_name}/{self.document_library}/{folder_name}/{file_name}"
+                file_url = f"/{self.site_type}/{self.site_name}/{self.document_library}/{folder_name}/{file_name}"
                 file_content = File.open_binary(self.ctx, file_url)
                 return file_content.content
             except Exception:
@@ -209,7 +213,9 @@ class Sharepoint:
         else:
             print(f"No files found in folder {folder}")
 
-    def upload_file(self, folder_name: str, file_path: str, file_name: Optional[str] = None):
+    def upload_file(
+        self, folder_name: str, file_path: str, file_name: Optional[str] = None
+    ):
         """
         Uploads a single file to a specified folder within the document library.
 
@@ -223,10 +229,12 @@ class Sharepoint:
                 if file_name is None:
                     file_name = os.path.basename(file_path)
 
-                folder_url = f"/teams/{self.site_name}/{self.document_library}/{folder_name}"
-                target_folder = self.ctx.web.get_folder_by_server_relative_url(folder_url)
+                folder_url = f"/{self.site_type}/{self.site_name}/{self.document_library}/{folder_name}"
+                target_folder = self.ctx.web.get_folder_by_server_relative_url(
+                    folder_url
+                )
 
-                with open(file_path, 'rb') as content_file:
+                with open(file_path, "rb") as content_file:
                     file_content = content_file.read()
 
                 target_folder.upload_file(file_name, file_content).execute_query()
@@ -250,7 +258,9 @@ class Sharepoint:
                 except Exception as e:
                     print(f"Failed to upload file '{file_path}': {e}")
 
-    def upload_file_from_bytes(self, binary_content: bytes, file_name: str, folder_name: str):
+    def upload_file_from_bytes(
+        self, binary_content: bytes, file_name: str, folder_name: str
+    ):
         """
         Uploads a file to SharePoint directly from a bytes object.
 
@@ -262,8 +272,10 @@ class Sharepoint:
 
         if self.ctx:
             try:
-                folder_url = f"/teams/{self.site_name}/{self.document_library}/{folder_name}"
-                target_folder = self.ctx.web.get_folder_by_server_relative_url(folder_url)
+                folder_url = f"/{self.site_type}/{self.site_name}/{self.document_library}/{folder_name}"
+                target_folder = self.ctx.web.get_folder_by_server_relative_url(
+                    folder_url
+                )
 
                 target_folder.upload_file(file_name, binary_content).execute_query()
                 print(f"File '{file_name}' uploaded successfully to '{folder_url}'.")
@@ -287,13 +299,17 @@ class Sharepoint:
         if isinstance(new_rows, dict):
             new_rows = [new_rows]
 
-        elif not isinstance(new_rows, list) or not all(isinstance(r, dict) for r in new_rows):
+        elif not isinstance(new_rows, list) or not all(
+            isinstance(r, dict) for r in new_rows
+        ):
             raise TypeError("new_rows must be a dict or a list of dicts.")
 
         # 1. Pull file
         binary_file = self.fetch_file_using_open_binary(excel_file_name, folder_name)
         if binary_file is None:
-            raise FileNotFoundError(f"File '{excel_file_name}' not found in folder '{folder_name}'.")
+            raise FileNotFoundError(
+                f"File '{excel_file_name}' not found in folder '{folder_name}'."
+            )
 
         wb = load_workbook(BytesIO(binary_file))
 
@@ -333,7 +349,9 @@ class Sharepoint:
 
         temp_stream.seek(0)
 
-        self.upload_file_from_bytes(temp_stream.getvalue(), excel_file_name, folder_name)
+        self.upload_file_from_bytes(
+            temp_stream.getvalue(), excel_file_name, folder_name
+        )
 
     def format_and_sort_excel_file(
         self,
@@ -373,7 +391,9 @@ class Sharepoint:
         # This ensures we don't override any other sheets in the excel file
         binary_file = self.fetch_file_using_open_binary(excel_file_name, folder_name)
         if binary_file is None:
-            raise FileNotFoundError(f"File '{excel_file_name}' not found in folder '{folder_name}'.")
+            raise FileNotFoundError(
+                f"File '{excel_file_name}' not found in folder '{folder_name}'."
+            )
 
         wb = load_workbook(BytesIO(binary_file))
         if sheet_name not in wb.sheetnames:
@@ -415,13 +435,19 @@ class Sharepoint:
                 ascending_flags.append(ascending)
 
                 if dtype == "datetime":
-                    df[col_name] = pd.to_datetime(df[col_name], dayfirst=True, errors="coerce")
+                    df[col_name] = pd.to_datetime(
+                        df[col_name], dayfirst=True, errors="coerce"
+                    )
 
                 elif dtype == "int":
-                    df[col_name] = pd.to_numeric(df[col_name], errors="coerce", downcast="integer")
+                    df[col_name] = pd.to_numeric(
+                        df[col_name], errors="coerce", downcast="integer"
+                    )
 
                 elif dtype == "float":
-                    df[col_name] = pd.to_numeric(df[col_name], errors="coerce", downcast="float")
+                    df[col_name] = pd.to_numeric(
+                        df[col_name], errors="coerce", downcast="float"
+                    )
 
                 elif dtype == "str":
                     df[col_name] = df[col_name].astype(str)
@@ -482,13 +508,17 @@ class Sharepoint:
                         col_width = ws.column_dimensions[col_letter].width or 10
                         chars_per_line = col_width * 1.2
                         lines = str(cell.value).split("\n")
-                        line_count = sum(math.ceil(len(line) / chars_per_line) for line in lines)
+                        line_count = sum(
+                            math.ceil(len(line) / chars_per_line) for line in lines
+                        )
                         max_line_count = max(max_line_count, line_count)
 
                 ws.row_dimensions[row[0].row].height = max_line_count * 20
 
         else:
-            raise ValueError(f"Column width provided with incorrect datatype - datatype int expected, instead column width is of datatype {type(column_widths)}")
+            raise ValueError(
+                f"Column width provided with incorrect datatype - datatype int expected, instead column width is of datatype {type(column_widths)}"
+            )
 
         # Step 7 - Freeze panes if needed
         if freeze_panes:
@@ -522,7 +552,7 @@ class Sharepoint:
                 cell.alignment = Alignment(
                     horizontal=align_horizontal,
                     vertical=align_vertical,
-                    wrap_text=cell.alignment.wrap_text
+                    wrap_text=cell.alignment.wrap_text,
                 )
 
         # Step 9 - Save and re-upload
@@ -532,4 +562,6 @@ class Sharepoint:
 
         temp_stream.seek(0)
 
-        self.upload_file_from_bytes(temp_stream.getvalue(), excel_file_name, folder_name)
+        self.upload_file_from_bytes(
+            temp_stream.getvalue(), excel_file_name, folder_name
+        )
