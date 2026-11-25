@@ -213,6 +213,83 @@ class Sharepoint:
         else:
             print(f"No files found in folder {folder}")
 
+    def ensure_folder(self, folder_name: str) -> bool:
+        """
+        Creates a folder in the document library if it does not already exist.
+
+        The upload methods look their target folder up with
+        get_folder_by_server_relative_url, which resolves a folder but never
+        creates one, so uploading into a folder that is not there fails. This
+        is the missing half: call it before an upload whose destination is
+        created on demand, for instance one folder per citizen.
+
+        Nested paths are supported and every missing level is created, so
+        "Periode fra GO til SBSYS/0101011234" works even when neither folder
+        exists yet.
+
+        Unlike the other methods on this class, this one RAISES instead of
+        printing and returning None. A folder that was not created is not a
+        detail the caller can shrug off - the upload that follows would fail,
+        or worse, look like it succeeded. Callers that genuinely do not care
+        can wrap it in their own try/except.
+
+        Args:
+            folder_name (str): The folder within the document library, relative
+                to it. May contain forward slashes for a nested path.
+
+        Returns:
+            bool: True if the folder was created, False if it already existed.
+
+        Raises:
+            RuntimeError: If the class is not authenticated, or the folder
+                could not be created.
+        """
+        if not self.ctx:
+            raise RuntimeError(
+                f"Not authenticated to SharePoint - cannot ensure folder '{folder_name}'. "
+                "See the authentication error printed by _auth."
+            )
+
+        # Two different bases, which is the easy thing to get wrong here.
+        # get_folder_by_server_relative_url wants the full server-relative URL
+        # the rest of this class builds, while ensure_folder_path resolves
+        # against the web's own root folder - so it starts at the document
+        # library instead.
+        # Empty segments are dropped rather than just trimmed at the ends: a
+        # caller composing "/" + name leaves a double slash in the MIDDLE,
+        # which ensure_folder_path shrugs off but which makes the lookup URL
+        # below miss, so an existing folder would be reported as missing.
+        relative_path = "/".join(
+            part
+            for part in f"{self.document_library}/{folder_name}".split("/")
+            if part
+        )
+        folder_url = f"/{self.site_type}/{self.site_name}/{relative_path}"
+
+        try:
+            folder = self.ctx.web.get_folder_by_server_relative_url(folder_url)
+            self.ctx.load(folder)
+            self.ctx.execute_query()
+
+            return False
+        except Exception:  # pylint: disable=broad-except
+            # The folder is not there - or something else is wrong, in which
+            # case the creation below fails and reports it properly. Deciding
+            # here which it was would mean parsing SharePoint error text.
+            pass
+
+        try:
+            self.ctx.web.ensure_folder_path(relative_path)
+            self.ctx.execute_query()
+        except Exception as e:
+            raise RuntimeError(
+                f"Could not create SharePoint folder '{folder_url}': {e}"
+            ) from e
+
+        print(f"Folder '{folder_url}' created.")
+
+        return True
+
     def upload_file(
         self, folder_name: str, file_path: str, file_name: Optional[str] = None
     ):
